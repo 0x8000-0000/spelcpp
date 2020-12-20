@@ -4,7 +4,8 @@ Implementation Notes
 Extracting Symbols
 ------------------
 
-Symbols are extracted from source code using the Clang tooling library.
+Symbols are extracted from source code. For processing C++ we are using the
+Clang tooling library.
 
 
 Processing
@@ -15,7 +16,7 @@ The symbol definitions are more important than "all tokens" because the other
 tokens could be defined in external headers upon which your project has no
 control. This produces two associative array: one which maps from a symbol
 name to its first encountered location, and a second one which maintains the
-counts for each symbol name.
+counts for each symbol name. Note that only this step is language-specific.
 
 2. Take the set of symbol definition names and split them down assuming the
 usual [cC]amelCase and snake\_case conventions. Eliminate known abbreviations
