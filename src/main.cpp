@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 bool verbose = false;
@@ -17,13 +19,12 @@ struct Accumulator
    int tokens = 0;
 
    int level = 0;
+
+   std::unordered_map<std::string, unsigned> identifiers;
 };
 
-void processCursor(CXCursor clangCursor, Accumulator& /* accumulator */)
+void processCursor(CXCursor clangCursor, Accumulator& accumulator)
 {
-   // const enum CXCursorKind cursorKind = clang_getCursorKind(clangCursor);
-
-   CXString name = clang_getCursorSpelling(clangCursor);
    if (clang_isCursorDefinition(clangCursor) != 0)
    {
       CXSourceLocation location = clang_getCursorLocation(clangCursor);
@@ -37,22 +38,39 @@ void processCursor(CXCursor clangCursor, Accumulator& /* accumulator */)
        * Further filter out if the symbol is in a header outside of the
        * project space.
        */
+      if (!clang_Location_isFromMainFile(location))
+      {
+         return;
+      }
+
+      CXString    name = clang_getCursorSpelling(clangCursor);
+      std::string tokenString{clang_getCString(name)};
+      clang_disposeString(name);
+
+      if (tokenString.empty())
+      {
+         return;
+      }
+
+      auto iter = accumulator.identifiers.find(tokenString);
+      if (iter != accumulator.identifiers.end())
+      {
+         iter->second++;
+         return;
+      }
 
       CXString definitionLocation;
       unsigned line;
       unsigned column;
       clang_getPresumedLocation(location, &definitionLocation, &line, &column);
 
-      fmt::print("Found definition for {} in {}:{}:{}\n",
-                 clang_getCString(name),
-                 clang_getCString(definitionLocation),
-                 line,
-                 column);
+      fmt::print(
+         "Found definition for {} in {}:{}:{}\n", tokenString, clang_getCString(definitionLocation), line, column);
 
       clang_disposeString(definitionLocation);
-   }
 
-   clang_disposeString(name);
+      accumulator.identifiers.emplace(std::move(tokenString), 1);
+   }
 }
 
 CXChildVisitResult visitTranslationUnit(CXCursor cursor, CXCursor /* parent */, CXClientData clientData)
@@ -67,6 +85,59 @@ CXChildVisitResult visitTranslationUnit(CXCursor cursor, CXCursor /* parent */, 
 
    accumulator->level--;
    return CXChildVisit_Continue;
+}
+
+void processLiteral(const CXTranslationUnit& translationUnit, const CXToken& token)
+{
+   CXSourceLocation tokenLocation = clang_getTokenLocation(translationUnit, token);
+
+   if (clang_Location_isInSystemHeader(tokenLocation))
+   {
+      return;
+   }
+
+   CXString tokenText = clang_getTokenSpelling(translationUnit, token);
+
+   CXString literalLocation;
+   unsigned line;
+   unsigned column;
+   clang_getPresumedLocation(tokenLocation, &literalLocation, &line, &column);
+
+   fmt::print("Found literal: {} at {}:{}:{}\n",
+              clang_getCString(tokenText),
+              clang_getCString(literalLocation),
+              line,
+              column);
+
+   clang_disposeString(literalLocation);
+
+   clang_disposeString(tokenText);
+}
+
+void processComment(const CXTranslationUnit& translationUnit, const CXToken& token)
+{
+   CXSourceLocation tokenLocation = clang_getTokenLocation(translationUnit, token);
+
+   if (clang_Location_isInSystemHeader(tokenLocation))
+   {
+      return;
+   }
+
+   CXString commentBlock = clang_getTokenSpelling(translationUnit, token);
+
+   CXString commentLocation;
+   unsigned line;
+   unsigned column;
+   clang_getPresumedLocation(tokenLocation, &commentLocation, &line, &column);
+
+   fmt::print("Found comment: {} at {}:{}:{}\n",
+              clang_getCString(commentBlock),
+              clang_getCString(commentLocation),
+              line,
+              column);
+
+   clang_disposeString(commentLocation);
+   clang_disposeString(commentBlock);
 }
 
 void processTranslationUnit(std::string_view fileName, const std::vector<std::string>& arguments)
@@ -122,30 +193,18 @@ void processTranslationUnit(std::string_view fileName, const std::vector<std::st
 
       for (unsigned ii = 0; ii < numTokens; ++ii)
       {
-         if (clang_getTokenKind(tokens[ii]) == CXToken_Comment)
+         switch (clang_getTokenKind(tokens[ii]))
          {
-            CXSourceLocation tokenLocation = clang_getTokenLocation(translationUnitPtr, tokens[ii]);
+         case CXToken_Comment:
+            processComment(translationUnitPtr, tokens[ii]);
+            break;
 
-            if (clang_Location_isInSystemHeader(tokenLocation))
-            {
-               continue;
-            }
+         case CXToken_Literal:
+            processLiteral(translationUnitPtr, tokens[ii]);
+            break;
 
-            CXString commentBlock = clang_getTokenSpelling(translationUnitPtr, tokens[ii]);
-
-            CXString commentLocation;
-            unsigned line;
-            unsigned column;
-            clang_getPresumedLocation(tokenLocation, &commentLocation, &line, &column);
-
-            fmt::print("Found comment: {} at {}:{}:{}\n",
-                       clang_getCString(commentBlock),
-                       clang_getCString(commentLocation),
-                       line,
-                       column);
-
-            clang_disposeString(commentLocation);
-            clang_disposeString(commentBlock);
+         default:
+            break;
          }
       }
 
