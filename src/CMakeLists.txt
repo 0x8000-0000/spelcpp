@@ -1,4 +1,4 @@
-add_executable(spelcpp main.cpp)
+add_executable(spelcpp main.cpp engine.cpp)
 target_include_directories(spelcpp PUBLIC ${LLVM_INCLUDE_DIRS}
                                           ${CLANG_INCLUDE_DIRS})
 target_compile_definitions(spelcpp PUBLIC ${LLVM_DEFINITIONS}

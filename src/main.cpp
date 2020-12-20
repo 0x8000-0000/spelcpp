@@ -18,6 +18,8 @@
    limitations under the License.
 */
 
+#include "engine.h"
+
 #include <clang-c/CXCompilationDatabase.h>
 #include <clang-c/Index.h>
 
@@ -28,22 +30,17 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
-#include <unordered_map>
-#include <utility>
 #include <vector>
 
 bool verbose = false;
 
-struct Accumulator
+std::string_view getStringView(CXString clangString)
 {
-   int tokens = 0;
+   const auto* cStr = clang_getCString(clangString);
+   return {cStr, strlen(cStr)};
+}
 
-   int level = 0;
-
-   std::unordered_map<std::string, unsigned> identifiers;
-};
-
-void processCursor(CXCursor clangCursor, Accumulator& accumulator)
+void processCursor(CXCursor clangCursor, splcp::SpellingEngine& engine)
 {
    if (clang_isCursorDefinition(clangCursor) != 0)
    {
@@ -55,27 +52,23 @@ void processCursor(CXCursor clangCursor, Accumulator& accumulator)
       }
 
       /*
-       * Further filter out if the symbol is in a header outside of the
+       * TODO: Further filter out if the symbol is in a header outside of the
        * project space.
+       *
+       * Right now this check is too coarse it filters out all header files.
        */
       if (!clang_Location_isFromMainFile(location))
       {
          return;
       }
 
-      CXString    name = clang_getCursorSpelling(clangCursor);
-      std::string tokenString{clang_getCString(name)};
-      clang_disposeString(name);
+      CXString tokenText = clang_getCursorSpelling(clangCursor);
+
+      auto tokenString = getStringView(tokenText);
 
       if (tokenString.empty())
       {
-         return;
-      }
-
-      auto iter = accumulator.identifiers.find(tokenString);
-      if (iter != accumulator.identifiers.end())
-      {
-         iter->second++;
+         clang_disposeString(tokenText);
          return;
       }
 
@@ -84,30 +77,24 @@ void processCursor(CXCursor clangCursor, Accumulator& accumulator)
       unsigned column;
       clang_getPresumedLocation(location, &definitionLocation, &line, &column);
 
-      fmt::print(
-         "Found definition for {} in {}:{}:{}\n", tokenString, clang_getCString(definitionLocation), line, column);
+      engine.observeDefinition(tokenString, getStringView(definitionLocation), line, column);
 
       clang_disposeString(definitionLocation);
-
-      accumulator.identifiers.emplace(std::move(tokenString), 1);
+      clang_disposeString(tokenText);
    }
 }
 
 CXChildVisitResult visitTranslationUnit(CXCursor cursor, CXCursor /* parent */, CXClientData clientData)
 {
-   auto* accumulator = reinterpret_cast<Accumulator*>(clientData);
+   auto* engine = reinterpret_cast<splcp::SpellingEngine*>(clientData);
 
-   processCursor(cursor, *accumulator);
-   accumulator->level++;
-
-   accumulator->tokens++;
+   processCursor(cursor, *engine);
    clang_visitChildren(cursor, visitTranslationUnit, clientData);
 
-   accumulator->level--;
    return CXChildVisit_Continue;
 }
 
-void processLiteral(const CXTranslationUnit& translationUnit, const CXToken& token)
+void processLiteral(const CXTranslationUnit& translationUnit, const CXToken& token, splcp::SpellingEngine& engine)
 {
    CXSourceLocation tokenLocation = clang_getTokenLocation(translationUnit, token);
 
@@ -116,25 +103,27 @@ void processLiteral(const CXTranslationUnit& translationUnit, const CXToken& tok
       return;
    }
 
-   CXString tokenText = clang_getTokenSpelling(translationUnit, token);
+   CXString   tokenText   = clang_getTokenSpelling(translationUnit, token);
+   const auto tokenString = getStringView(tokenText);
+
+   if (tokenString.empty() || (tokenString[0] != '"'))
+   {
+      clang_disposeString(tokenText);
+      return;
+   }
 
    CXString literalLocation;
    unsigned line;
    unsigned column;
    clang_getPresumedLocation(tokenLocation, &literalLocation, &line, &column);
 
-   fmt::print("Found literal: {} at {}:{}:{}\n",
-              clang_getCString(tokenText),
-              clang_getCString(literalLocation),
-              line,
-              column);
+   engine.observeStringLiteral(tokenString, getStringView(literalLocation), line, column);
 
    clang_disposeString(literalLocation);
-
    clang_disposeString(tokenText);
 }
 
-void processComment(const CXTranslationUnit& translationUnit, const CXToken& token)
+void processComment(const CXTranslationUnit& translationUnit, const CXToken& token, splcp::SpellingEngine& engine)
 {
    CXSourceLocation tokenLocation = clang_getTokenLocation(translationUnit, token);
 
@@ -143,21 +132,17 @@ void processComment(const CXTranslationUnit& translationUnit, const CXToken& tok
       return;
    }
 
-   CXString commentBlock = clang_getTokenSpelling(translationUnit, token);
+   CXString commentText = clang_getTokenSpelling(translationUnit, token);
 
    CXString commentLocation;
    unsigned line;
    unsigned column;
    clang_getPresumedLocation(tokenLocation, &commentLocation, &line, &column);
 
-   fmt::print("Found comment: {} at {}:{}:{}\n",
-              clang_getCString(commentBlock),
-              clang_getCString(commentLocation),
-              line,
-              column);
+   engine.observeComment(getStringView(commentText), getStringView(commentLocation), line, column);
 
    clang_disposeString(commentLocation);
-   clang_disposeString(commentBlock);
+   clang_disposeString(commentText);
 }
 
 void processTranslationUnit(std::string_view fileName, const std::vector<std::string>& arguments)
@@ -198,9 +183,9 @@ void processTranslationUnit(std::string_view fileName, const std::vector<std::st
       /*
        * Collect all the definitions
        */
-      Accumulator accumulator;
-      CXCursor    cursor = clang_getTranslationUnitCursor(translationUnitPtr);
-      clang_visitChildren(cursor, visitTranslationUnit, &accumulator);
+      splcp::SpellingEngine engine;
+      CXCursor              cursor = clang_getTranslationUnitCursor(translationUnitPtr);
+      clang_visitChildren(cursor, visitTranslationUnit, &engine);
 
       CXSourceRange range = clang_getCursorExtent(cursor);
 
@@ -216,11 +201,11 @@ void processTranslationUnit(std::string_view fileName, const std::vector<std::st
          switch (clang_getTokenKind(tokens[ii]))
          {
          case CXToken_Comment:
-            processComment(translationUnitPtr, tokens[ii]);
+            processComment(translationUnitPtr, tokens[ii], engine);
             break;
 
          case CXToken_Literal:
-            processLiteral(translationUnitPtr, tokens[ii]);
+            processLiteral(translationUnitPtr, tokens[ii], engine);
             break;
 
          default:
