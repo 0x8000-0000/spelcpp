@@ -16,10 +16,15 @@ add_library(project_warnings INTERFACE)
 target_compile_options(project_warnings INTERFACE -Wall -Wextra -Werror
                                                   -pedantic -Wunused -Wshadow)
 
-find_package(LLVM REQUIRED CONFIG)
+find_package(Clang REQUIRED)
+
+# Add path to LLVM modules
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${LLVM_CMAKE_DIR}")
+
+# import LLVM CMake functions
+include(AddLLVM)
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
-message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
 
 include(GoogleTest)
 enable_testing()
