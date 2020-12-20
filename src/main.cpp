@@ -12,12 +12,152 @@
 
 bool verbose = false;
 
-void processTranslationUnit(std::string_view fileName, const std::vector<std::string>& /* arguments */)
+struct Accumulator
+{
+   int tokens = 0;
+
+   int level = 0;
+};
+
+void processCursor(CXCursor clangCursor, Accumulator& /* accumulator */)
+{
+   // const enum CXCursorKind cursorKind = clang_getCursorKind(clangCursor);
+
+   CXString name = clang_getCursorSpelling(clangCursor);
+   if (clang_isCursorDefinition(clangCursor) != 0)
+   {
+      CXSourceLocation location = clang_getCursorLocation(clangCursor);
+
+      if (clang_Location_isInSystemHeader(location))
+      {
+         return;
+      }
+
+      /*
+       * Further filter out if the symbol is in a header outside of the
+       * project space.
+       */
+
+      CXString definitionLocation;
+      unsigned line;
+      unsigned column;
+      clang_getPresumedLocation(location, &definitionLocation, &line, &column);
+
+      fmt::print("Found definition for {} in {}:{}:{}\n",
+                 clang_getCString(name),
+                 clang_getCString(definitionLocation),
+                 line,
+                 column);
+
+      clang_disposeString(definitionLocation);
+   }
+
+   clang_disposeString(name);
+}
+
+CXChildVisitResult visitTranslationUnit(CXCursor cursor, CXCursor /* parent */, CXClientData clientData)
+{
+   auto* accumulator = reinterpret_cast<Accumulator*>(clientData);
+
+   processCursor(cursor, *accumulator);
+   accumulator->level++;
+
+   accumulator->tokens++;
+   clang_visitChildren(cursor, visitTranslationUnit, clientData);
+
+   accumulator->level--;
+   return CXChildVisit_Continue;
+}
+
+void processTranslationUnit(std::string_view fileName, const std::vector<std::string>& arguments)
 {
    if (verbose)
    {
       fmt::print("Processing {}\n", fileName);
    }
+
+   auto clangIndex = clang_createIndex(/* excludeDeclarationsFromPCH = */ 0,
+                                       /* displayDiagnostics         = */ 0);
+
+   CXTranslationUnit translationUnitPtr = nullptr;
+
+   const unsigned parsingOptions = CXTranslationUnit_DetailedPreprocessingRecord | CXTranslationUnit_KeepGoing |
+                                   CXTranslationUnit_CreatePreambleOnFirstParse |
+                                   clang_defaultEditingTranslationUnitOptions();
+
+   std::vector<const char*> argPointers;
+   argPointers.reserve(arguments.size());
+   for (const auto& str : arguments)
+   {
+      argPointers.push_back(str.data());
+   }
+
+   const CXErrorCode parseError = clang_parseTranslationUnit2(
+      /* CIdx                  = */ clangIndex,
+      /* source_filename       = */ fileName.data(),
+      /* command_line_args     = */ argPointers.data(),
+      /* num_command_line_args = */ static_cast<int>(argPointers.size()),
+      /* unsaved_files         = */ nullptr,
+      /* num_unsaved_files     = */ 0,
+      /* options               = */ parsingOptions,
+      /* out_TU                = */ &translationUnitPtr);
+
+   if ((parseError == CXError_Success) && (nullptr != translationUnitPtr))
+   {
+      /*
+       * Collect all the definitions
+       */
+      Accumulator accumulator;
+      CXCursor    cursor = clang_getTranslationUnitCursor(translationUnitPtr);
+      clang_visitChildren(cursor, visitTranslationUnit, &accumulator);
+
+      CXSourceRange range = clang_getCursorExtent(cursor);
+
+      /*
+       * Collect the comments
+       */
+      CXToken* tokens    = nullptr;
+      unsigned numTokens = 0;
+      clang_tokenize(translationUnitPtr, range, &tokens, &numTokens);
+
+      for (unsigned ii = 0; ii < numTokens; ++ii)
+      {
+         if (clang_getTokenKind(tokens[ii]) == CXToken_Comment)
+         {
+            CXSourceLocation tokenLocation = clang_getTokenLocation(translationUnitPtr, tokens[ii]);
+
+            if (clang_Location_isInSystemHeader(tokenLocation))
+            {
+               continue;
+            }
+
+            CXString commentBlock = clang_getTokenSpelling(translationUnitPtr, tokens[ii]);
+
+            CXString commentLocation;
+            unsigned line;
+            unsigned column;
+            clang_getPresumedLocation(tokenLocation, &commentLocation, &line, &column);
+
+            fmt::print("Found comment: {} at {}:{}:{}\n",
+                       clang_getCString(commentBlock),
+                       clang_getCString(commentLocation),
+                       line,
+                       column);
+
+            clang_disposeString(commentLocation);
+            clang_disposeString(commentBlock);
+         }
+      }
+
+      clang_disposeTokens(translationUnitPtr, tokens, numTokens);
+   }
+
+   if (nullptr != translationUnitPtr)
+   {
+      clang_disposeTranslationUnit(translationUnitPtr);
+   }
+
+   clang_disposeIndex(clangIndex);
 }
 
 int main(int argc, char* argv[])
