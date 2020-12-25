@@ -1,5 +1,5 @@
 ---
-Checks:          'clang-diagnostic-*,clang-analyzer-*,*,-modernize-use-trailing-return-type,-fuchsia-default-arguments-calls,-llvm-header-guard,-cppcoreguidelines-pro-bounds-array-to-pointer-decay,-hicpp-no-array-decay,-fuchsia-overloaded-operator,-cppcoreguidelines-pro-bounds-pointer-arithmetic,-cppcoreguidelines-pro-type-reinterpret-cast,-fuchsia-default-arguments-declarations,-google-runtime-references,-modernize-use-nodiscard,-fuchsia-statically-constructed-objects,-cppcoreguidelines-pro-type-union-access'
+Checks:          'clang-diagnostic-*,clang-analyzer-*,*,-modernize-use-trailing-return-type,-fuchsia-default-arguments-calls,-llvm-header-guard,-cppcoreguidelines-pro-bounds-array-to-pointer-decay,-hicpp-no-array-decay,-fuchsia-overloaded-operator,-cppcoreguidelines-pro-bounds-pointer-arithmetic,-cppcoreguidelines-pro-type-reinterpret-cast,-fuchsia-default-arguments-declarations,-google-runtime-references,-modernize-use-nodiscard,-fuchsia-statically-constructed-objects,-cppcoreguidelines-pro-type-union-access,-llvmlibc-*'
 WarningsAsErrors: '*'
 HeaderFilterRegex: ''
 AnalyzeTemporaryDtors: false
@@ -121,7 +121,7 @@ CheckOptions:
   - key:             cppcoreguidelines-pro-bounds-constant-array-index.GslHeader
     value:           ''
   - key:             cppcoreguidelines-pro-bounds-constant-array-index.IncludeStyle
-    value:           '0'
+    value:           llvm
   - key:             cppcoreguidelines-pro-type-member-init.IgnoreArrays
     value:           '0'
   - key:             cppcoreguidelines-pro-type-member-init.UseAssignment
@@ -251,7 +251,7 @@ CheckOptions:
   - key:             modernize-make-shared.IgnoreMacros
     value:           '1'
   - key:             modernize-make-shared.IncludeStyle
-    value:           '0'
+    value:           llvm
   - key:             modernize-make-shared.MakeSmartPtrFunction
     value:           'std::make_shared'
   - key:             modernize-make-shared.MakeSmartPtrFunctionHeader
@@ -259,7 +259,7 @@ CheckOptions:
   - key:             modernize-make-unique.IgnoreMacros
     value:           '1'
   - key:             modernize-make-unique.IncludeStyle
-    value:           '0'
+    value:           llvm
   - key:             modernize-make-unique.MakeSmartPtrFunction
     value:           'std::make_unique'
   - key:             modernize-make-unique.MakeSmartPtrFunctionHeader
@@ -361,7 +361,7 @@ CheckOptions:
   - key:             readability-identifier-naming.ClassConstantPrefix
     value:           k_
   - key:             readability-identifier-naming.FunctionCase
-    value:           camelCase
+    value:           camelBack
   - key:             readability-identifier-naming.GlobalConstantCase
     value:           CamelCase
   - key:             readability-identifier-naming.GlobalConstantPrefix

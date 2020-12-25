@@ -32,6 +32,7 @@
 #include <string_view>
 #include <vector>
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 bool verbose = false;
 
 std::string_view getStringView(CXString clangString)
@@ -46,7 +47,7 @@ void processCursor(CXCursor clangCursor, splcp::SpellingEngine& engine)
    {
       CXSourceLocation location = clang_getCursorLocation(clangCursor);
 
-      if (clang_Location_isInSystemHeader(location))
+      if (clang_Location_isInSystemHeader(location) != 0)
       {
          return;
       }
@@ -57,7 +58,7 @@ void processCursor(CXCursor clangCursor, splcp::SpellingEngine& engine)
        *
        * Right now this check is too coarse it filters out all header files.
        */
-      if (!clang_Location_isFromMainFile(location))
+      if (clang_Location_isFromMainFile(location) == 0)
       {
          return;
       }
@@ -73,8 +74,8 @@ void processCursor(CXCursor clangCursor, splcp::SpellingEngine& engine)
       }
 
       CXString definitionLocation;
-      unsigned line;
-      unsigned column;
+      unsigned line   = 0;
+      unsigned column = 0;
       clang_getPresumedLocation(location, &definitionLocation, &line, &column);
 
       engine.observeDefinition(tokenString, getStringView(definitionLocation), line, column);
@@ -98,7 +99,7 @@ void processLiteral(const CXTranslationUnit& translationUnit, const CXToken& tok
 {
    CXSourceLocation tokenLocation = clang_getTokenLocation(translationUnit, token);
 
-   if (clang_Location_isInSystemHeader(tokenLocation))
+   if (clang_Location_isInSystemHeader(tokenLocation) != 0)
    {
       return;
    }
@@ -113,8 +114,8 @@ void processLiteral(const CXTranslationUnit& translationUnit, const CXToken& tok
    }
 
    CXString literalLocation;
-   unsigned line;
-   unsigned column;
+   unsigned line   = 0;
+   unsigned column = 0;
    clang_getPresumedLocation(tokenLocation, &literalLocation, &line, &column);
 
    engine.observeStringLiteral(tokenString, getStringView(literalLocation), line, column);
@@ -127,7 +128,7 @@ void processComment(const CXTranslationUnit& translationUnit, const CXToken& tok
 {
    CXSourceLocation tokenLocation = clang_getTokenLocation(translationUnit, token);
 
-   if (clang_Location_isInSystemHeader(tokenLocation))
+   if (clang_Location_isInSystemHeader(tokenLocation) != 0)
    {
       return;
    }
@@ -135,8 +136,8 @@ void processComment(const CXTranslationUnit& translationUnit, const CXToken& tok
    CXString commentText = clang_getTokenSpelling(translationUnit, token);
 
    CXString commentLocation;
-   unsigned line;
-   unsigned column;
+   unsigned line   = 0;
+   unsigned column = 0;
    clang_getPresumedLocation(tokenLocation, &commentLocation, &line, &column);
 
    engine.observeComment(getStringView(commentText), getStringView(commentLocation), line, column);
@@ -152,13 +153,14 @@ void processTranslationUnit(std::string_view fileName, const std::vector<std::st
       fmt::print("Processing {}\n", fileName);
    }
 
-   auto clangIndex = clang_createIndex(/* excludeDeclarationsFromPCH = */ 0,
-                                       /* displayDiagnostics         = */ 0);
+   auto* clangIndex = clang_createIndex(/* excludeDeclarationsFromPCH = */ 0,
+                                        /* displayDiagnostics         = */ 0);
 
    CXTranslationUnit translationUnitPtr = nullptr;
 
-   const unsigned parsingOptions = CXTranslationUnit_DetailedPreprocessingRecord | CXTranslationUnit_KeepGoing |
-                                   CXTranslationUnit_CreatePreambleOnFirstParse |
+   const unsigned parsingOptions = static_cast<unsigned>(CXTranslationUnit_DetailedPreprocessingRecord) |
+                                   static_cast<unsigned>(CXTranslationUnit_KeepGoing) |
+                                   static_cast<unsigned>(CXTranslationUnit_CreatePreambleOnFirstParse) |
                                    clang_defaultEditingTranslationUnitOptions();
 
    std::vector<const char*> argPointers;
@@ -244,13 +246,13 @@ int main(int argc, char* argv[])
 
       const auto result = options.parse(argc, argv);
 
-      if (result.count("help"))
+      if (result.count("help") > 0)
       {
          fmt::print("{}\n", options.help({"", "Input"}));
          return 0;
       }
 
-      if (result.count("verbose"))
+      if (result.count("verbose") > 0)
       {
          verbose = true;
       }
@@ -357,7 +359,7 @@ int main(int argc, char* argv[])
             }
             else
             {
-               arguments.push_back(argumentText);
+               arguments.emplace_back(argumentText);
             }
 
             clang_disposeString(cxString);
